@@ -16,6 +16,8 @@ PASSWORD = 'Lop72698'
 RECEIVER_EMAIL = 'y.raj@911fintech.com'
 ENVIRONMENT = "Sandbox"
 
+aree bhai
+
 IST_OFFSET = timedelta(hours=5, minutes=30)
 
 # Define expected runtime for each task (in seconds)
