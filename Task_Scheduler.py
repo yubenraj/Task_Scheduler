@@ -7,16 +7,16 @@ import ctypes
 from datetime import datetime, timezone
 from datetime import timedelta
 import json
+import socket
+from email.mime.image import MIMEImage
 
 # Configuration for SMTP
 SMTP_SERVER = 'smtp.office365.com'
 SMTP_PORT = 587
 USERNAME = 'noreply@fi911.com'
 PASSWORD = 'Lop72698'
-RECEIVER_EMAIL = 'y.raj@911fintech.com'
+RECEIVER_EMAILS = ['y.raj@911fintech.com', '']
 ENVIRONMENT = "Sandbox"
-
-aree bhai
 
 IST_OFFSET = timedelta(hours=5, minutes=30)
 
@@ -33,11 +33,13 @@ STATUS_MAPPING = {
     3: "Ready",
     4: "Running"   
 }
+HOSTNAME = socket.gethostname()
+print("Hostname:", HOSTNAME)
 
 def send_email(subject, body):
     msg = MIMEMultipart()
     msg['From'] = USERNAME
-    msg['To'] = RECEIVER_EMAIL
+    msg['To'] = ", ".join(RECEIVER_EMAILS)  # Join the list of emails with commas
     msg['Subject'] = subject
 
     msg.attach(MIMEText(body, 'html'))
@@ -45,9 +47,29 @@ def send_email(subject, body):
     with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
         server.starttls()
         server.login(USERNAME, PASSWORD)
-        server.sendmail(msg['From'], msg['To'], msg.as_string())
+        server.sendmail(msg['From'], RECEIVER_EMAILS, msg.as_string())  # Use RECEIVER_EMAILS list here
 
+def send_email(subject, body):
+    msg = MIMEMultipart()
+    msg['From'] = USERNAME
+    msg['To'] = ", ".join(RECEIVER_EMAILS)
+    msg['Subject'] = subject
 
+    # Attach the HTML body
+    msg.attach(MIMEText(body, 'html'))
+
+    # Path to the logo image
+    logo_path = r'c:\Users\y.raj\Pictures\Logo.PNG'
+    with open(logo_path, 'rb') as logo_file:
+        logo = MIMEImage(logo_file.read())
+        logo.add_header('Content-ID', '<logo>')  # Use this ID in HTML to reference the image
+        msg.attach(logo)
+
+    with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+        server.starttls()
+        server.login(USERNAME, PASSWORD)
+        server.sendmail(msg['From'], RECEIVER_EMAILS, msg.as_string())
+        
 def get_error_message(error_code):
     FORMAT_MESSAGE_ALLOCATE_BUFFER = 0x00000100
     FORMAT_MESSAGE_FROM_SYSTEM = 0x00001000
@@ -75,12 +97,18 @@ def get_error_message(error_code):
     ctypes.windll.kernel32.LocalFree(lpMsgBuf)
 
     return error_message.strip()  # Return the message as it is
+def get_all_tasks(folder):
+    tasks = list(folder.GetTasks(0))
+    for subfolder in (folder.GetFolders(0)):
+        tasks += get_all_tasks(subfolder)
+    return tasks
+
 
 def check_tasks():
     scheduler = win32com.client.Dispatch("Schedule.Service")
     scheduler.Connect()
     rootFolder = scheduler.GetFolder("\\")
-    tasks = rootFolder.GetTasks(0)
+    tasks = get_all_tasks(rootFolder)
     tasks_with_issues = []
 
     for task in tasks:
@@ -111,7 +139,8 @@ def check_tasks():
                             "error_message": error_message,
                             "last_run_time": task_last_run_time,
                             "Status": "Running",
-                            "environment": ENVIRONMENT
+                            "environment": ENVIRONMENT,
+
                         })
 
             elif task_info == 3:  # Task is ready (not running)
@@ -137,7 +166,7 @@ def gather_task_statuses():
     scheduler = win32com.client.Dispatch("Schedule.Service")
     scheduler.Connect()
     rootFolder = scheduler.GetFolder("\\")
-    tasks = rootFolder.GetTasks(0)
+    tasks = get_all_tasks(rootFolder)
     
     status_report = []
 
@@ -175,30 +204,36 @@ if __name__ == "__main__":
                 all_tasks_with_issues.append(task)
                 alerted_tasks[task_name] = True
 
-        if time.time() - start_time >= 150: # Error Mail trigger time
+        if time.time() - start_time >= 100: # Error Mail trigger time
             if all_tasks_with_issues:
                 body = """
                 <html>
                     <body>
                         <p>Hi,</p>
-                        <p style="color:red;"><b>Warning:</b> The following tasks encountered issues:</p>
-                        <table border="1">
-                            <tr>
-                                <th>Task Name</th>
-                                <th>Status</th>
-                                <th>Environment</th>
-                                <th>Expected Runtime (min)</th>
-                                <th>Actual Runtime (min)</th>
-                                <th>Last Run Time</th>
-                                <th>Error Message</th>
-                            </tr>
+                        <p>The following tasks encountered issues:</p>  <!-- Closing Remarks -->
+                        <table border="1" style="border-collapse: collapse; width: 100%;">
+                        <tr style="background-color: #D3D3D3;">
+                            <th>Environment</th>
+                            <th>Host Name</th>
+                            <th>Task Name</th>
+                            <th>Status</th>
+                            <th>Expected Runtime (min)</th>
+                            <th>Actual Runtime (min)</th>
+                            <th>Last Run Time</th>
+                            <th>Error Message</th>
+                        </tr>
                 """
                 for task in all_tasks_with_issues:
+                    if task['Status'] == "Failed":
+                        row_color = "#FFCCCB"  # Light red for failed tasks
+                    elif task['Status'] == "Running":
+                        row_color = "#CCFFCC"  # Light green for running tasks
                     body += f"""
-                    <tr>
+                    <tr style="background-color: {row_color};">
+                        <td>{task['environment']}</td>
+                        <td>{HOSTNAME}</td>
                         <td>{task['task_name']}</td>
                         <td>{task['Status']}</td>
-                        <td>{task['environment']}</td>
                         <td>{task['expected_runtime']}</td>
                         <td>{task['actual_runtime']}</td>
                         <td>{task['last_run_time'].strftime('%Y-%m-%d %H:%M:%S')}</td>
@@ -208,7 +243,8 @@ if __name__ == "__main__":
                 body += """
                         </table>
                         <p>Regards-Fi911 Support</p>  <!-- Closing Remarks -->
-                        <p style="color:red;"><b>Note:</b> This is an automated message, please do not reply.</p>
+                        <img src="cid:logo" alt="Company Logo" style="width:100px; height:auto;"/>
+                        <p>This is an automated message, please do not reply.</p>  <!-- Closing Remarks -->
                     </body>
                 </html>
                 """
@@ -219,7 +255,7 @@ if __name__ == "__main__":
             start_time = time.time()
             alerted_tasks.clear()
 
-        if time.time() - status_email_time >= 60: # Status Mail trigger time
+        if time.time() - status_email_time >= 200: # Status Mail trigger time
             task_statuses = gather_task_statuses()
             status_body = """
             <html>
@@ -251,7 +287,7 @@ if __name__ == "__main__":
             status_body += """
                     </table>
                     <p>Regards-Fi911 Support</p>  <!-- Closing Remarks -->
-                    <p style="color:red;"><b>Note:</b> This is an automated message, please do not reply.</p>
+                    <p>This is an automated message, please do not reply.</p>  <!-- Closing Remarks -->
                 </body>
             </html>
             """
